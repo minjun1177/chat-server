@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "Copy this file to .mcp.json (project) or ~/.localchat/mcp.json (personal).",
+    "Every enabled server is started when the app launches; its tools show up as",
+    "mcp__<server>__<tool> and are called exactly like the built-in tools.",
+    "${VAR} and ${env:VAR} are replaced with the matching environment variable,",
+    "so tokens never have to be written into this file."
+  ],
+
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/work"]
+    },
+
+    "sqlite": {
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "D:/work/app.db"],
+      "autoApprove": ["list_tables", "describe_table", "read_query"]
+    },
+
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"}
+    },
+
+    "legacy-remote": {
+      "type": "sse",
+      "url": "http://localhost:3001/sse"
+    },
+
+    "turned-off-for-now": {
+      "command": "node",
+      "args": ["./servers/my-server.js"],
+      "env": {"API_KEY": "${MY_API_KEY}"},
+      "cwd": "D:/work",
+      "timeout": 60,
+      "disabled": true
+    }
+  }
+}

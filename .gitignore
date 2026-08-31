@@ -1,0 +1,26 @@
+memory.json
+tmp/
+*venv*/
+sessions/
+__pycache__/
+.chat_history
+.clauderc
+2*.txt
+clauderc
+.*/
+!.github/
+node_modules/
+package-lock.json
+package.json
+tests/
+.mcp.json
+.permissions.json
+mcp.log
+workspace/
+memory/
+.permissions.discord.json
+
+# secrets and deployment settings - never commit these
+.env
+.env.*
+!.env.example

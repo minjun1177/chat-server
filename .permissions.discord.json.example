@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Copy this file to .permissions.discord.json. It is read ONLY by bot.py,",
+    "on top of .permissions.json and ~/.localchat/permissions.json - so the bot",
+    "can be stricter than your terminal without changing how the terminal works.",
+    "deny always wins, and anything unmatched still asks with the approval buttons.",
+    "Pressing '항상 허용' on a prompt appends an allow rule to this file."
+  ],
+
+  "allow": [
+    "git_status",
+    "git_diff",
+    "run_cmd(git status)",
+    "run_cmd(git log*)",
+    "read_file(/home/you/projects/*)"
+  ],
+
+  "deny": [
+    "delete_file",
+    "run_cmd(rm *)",
+    "run_cmd(sudo *)",
+    "run_cmd(* --force*)",
+    "run_cmd(curl *)",
+    "write_file(*/.env)",
+    "read_file(*/.env)",
+    "read_file(*/id_rsa*)",
+    "read_file(*/.localchat/*)",
+    "call_api(*discord.com/api*)"
+  ]
+}

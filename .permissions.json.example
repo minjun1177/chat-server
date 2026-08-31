@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Copy to .permissions.json (project) or ~/.localchat/permissions.json (personal).",
+    "deny wins over allow, and anything unmatched falls through to the approval",
+    "prompt as before - so an empty file changes nothing.",
+    "A rule is a tool name, optionally followed by a pattern in parentheses that",
+    "is matched against the call's main argument. Both halves take * and ?.",
+    "A pattern with no wildcard also covers '<pattern> <anything>', so",
+    "run_cmd(git status) already allows 'git status --short'.",
+    "Answer 'a' at any approval prompt to append a rule here automatically."
+  ],
+
+  "allow": [
+    "run_cmd(git status)",
+    "run_cmd(git diff)",
+    "run_cmd(git log)",
+    "create_dir(D:/work/*)",
+    "mcp__filesystem__*"
+  ],
+
+  "deny": [
+    "delete_file",
+    "run_cmd(rm *)",
+    "run_cmd(* --force*)",
+    "write_file(*/.env)",
+    "read_file(*/id_rsa)"
+  ]
+}
