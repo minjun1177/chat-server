@@ -5,8 +5,9 @@ import datetime
 from contextvars import ContextVar
 
 import config
+import logs
 import providers
-from config import S, ttlp
+from config import ttlp
 
 
 # Where this conversation's memory and transcripts live. The terminal uses the
@@ -179,7 +180,7 @@ def save_session(messages: list[dict], session_id: str) -> str:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"  {S.ERR}✗ Failed to save session: {e}{S.R}")
+        logs.error(f"failed to save the session: {e}")
     return session_id
 
 
@@ -206,7 +207,7 @@ def rename_session(session_id: str, new_title: str) -> str:
             os.replace(old_path, os.path.join(session_dir(), f"{new_id}.json"))
         return new_id
     except Exception as e:
-        print(f"  {S.ERR}✗ Failed to rename session: {e}{S.R}")
+        logs.error(f"failed to rename the session: {e}")
         return session_id
 
 

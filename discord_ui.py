@@ -19,10 +19,12 @@ is why the event loop stays free to answer other channels while `run_cmd` runs.
 import asyncio
 import io
 import os
+import time
 
 import discord
 
 import config
+import logs
 import permissions
 import ui
 
@@ -288,8 +290,17 @@ class DiscordSink(ui.Sink):
         self._stop_view = None
         self._closed = False
         self._posted = False          # did this exchange put anything on screen?
+        self.tools_run = 0
+        self._started = {}            # tool card -> when the call began
 
     # -- plumbing ----------------------------------------------------------
+
+    @property
+    def _actor(self) -> str:
+        if self.author is None:
+            return "unknown"
+        name = getattr(self.author, "display_name", None) or str(self.author)
+        return f"{name}({self.author.id})"
 
     @property
     def _allowed_ids(self) -> set[int]:
@@ -466,7 +477,7 @@ class DiscordSink(ui.Sink):
             else:
                 await self._message.edit(content=content)
         except Exception as error:              # noqa: BLE001 - a turn outlives a failed edit
-            print(f"[discord] could not write a message: {error!r}")
+            logs.error(f"could not write a message: {error!r}")
             self._last_written = ""             # so the next flush tries again
 
         if close:
@@ -482,7 +493,7 @@ class DiscordSink(ui.Sink):
             try:
                 await self._flusher
             except Exception as error:          # noqa: BLE001 - a turn outlives a failed edit
-                print(f"[discord] the flusher stopped badly: {error!r}")
+                logs.error(f"the flusher stopped badly: {error!r}")
             self._flusher = None
 
         await self._flush(final=True)
@@ -513,7 +524,7 @@ class DiscordSink(ui.Sink):
                 await self._send(content="The rest of the answer was too long for a message.",
                                  file=discord.File(data, filename="answer.md"))
             except discord.HTTPException as error:
-                print(f"[discord] could not upload the overflow: {error}")
+                logs.error(f"could not upload the overflow: {error}")
             self._overflow = ""
 
         if not self._posted and not self.aborted:
@@ -552,21 +563,27 @@ class DiscordSink(ui.Sink):
                 lines.append(f"{key}: {_clip(text, 300)}")
             embed.description = "```\n" + _clip("\n".join(lines), config.DISCORD_TOOL_ARG_CHARS) + "\n```"
         embed.set_footer(text="running…")
+        self.tools_run += 1
+        logs.tool_call(name, arguments, actor=self._actor)
         try:
             view = self._claim_stop_view()
             message = await self._send(embed=embed, view=view)
             self._posted = True
+            self._started[id(message)] = time.monotonic()
             if view is not None:
                 self._stop_message = message
             return message
         except discord.HTTPException as error:
-            print(f"[discord] could not post a tool card: {error}")
+            logs.error(f"could not post a tool card: {error}")
             return None
 
     async def tool_result(self, handle, name: str, result: str) -> None:
         result = result or ""
         failed = result.lstrip().startswith(("[Error]", "[System] User denied",
                                              "[System] The tool", "[System] '"))
+        started = self._started.pop(id(handle), None) if handle is not None else None
+        logs.tool_result(name, not failed, len(result),
+                         time.monotonic() - started if started else 0.0)
         if handle is None:
             return
         embed = handle.embeds[0] if handle.embeds else discord.Embed(title=f"▸ {name}")
@@ -578,7 +595,7 @@ class DiscordSink(ui.Sink):
         try:
             await handle.edit(embed=embed)
         except discord.HTTPException as error:
-            print(f"[discord] could not update a tool card: {error}")
+            logs.error(f"could not update a tool card: {error}")
 
     async def run_tool(self, fn, name: str, arguments: dict):
         # Tool handlers are synchronous and some of them take minutes. Off the
@@ -599,7 +616,7 @@ class DiscordSink(ui.Sink):
         try:
             return self._call(self._approval_flow(label, details, rule, timeout), timeout + 30)
         except Exception as error:                  # noqa: BLE001 - a failure must not approve
-            print(f"[discord] approval failed: {error!r}")
+            logs.error(f"approval failed: {error!r}")
             return False
 
     async def _approval_flow(self, label, details, rule, timeout) -> bool:
@@ -628,14 +645,18 @@ class DiscordSink(ui.Sink):
             await message.edit(embed=embed, view=None)
         except discord.HTTPException:
             pass
-        return bool(view.result) and not timed_out
+
+        granted = bool(view.result) and not timed_out
+        logs.approval(label, "nobody (timed out)" if timed_out else self._actor,
+                      granted, view.saved_rule or rule)
+        return granted
 
     def ask_choice(self, question: str, options: list[str], index: int, total: int) -> str | None:
         timeout = config.DISCORD_QUESTION_TIMEOUT
         try:
             return self._call(self._choice_flow(question, options, index, total, timeout), timeout + 30)
         except Exception as error:                  # noqa: BLE001
-            print(f"[discord] question failed: {error!r}")
+            logs.error(f"question failed: {error!r}")
             return None
 
     async def _choice_flow(self, question, options, index, total, timeout) -> str | None:
@@ -684,7 +705,7 @@ class DiscordSink(ui.Sink):
                 self._plan_flow(context_discovered, diff_blueprint, verification_steps, timeout),
                 timeout + 30)
         except Exception as error:                  # noqa: BLE001
-            print(f"[discord] plan approval failed: {error!r}")
+            logs.error(f"plan approval failed: {error!r}")
             return "[System] Plan Rejected by User. Abort the task."
 
     async def _plan_flow(self, context_discovered, diff_blueprint, verification_steps, timeout) -> str:

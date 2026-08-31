@@ -8,8 +8,9 @@ import hashlib
 import requests
 import psutil
 import config
-from config import S, TREE_SITTER_AVAILABLE, _TS_LANGUAGES, _EXT_TO_LANG
+from config import TREE_SITTER_AVAILABLE, _TS_LANGUAGES, _EXT_TO_LANG
 from skills import handle_use_skill
+import logs
 import mcp_client
 import discord_tools
 import ui
@@ -904,11 +905,13 @@ def dispatch_tool(function_name: str, arguments: dict) -> str | None:
     # is refused here without reaching permissions or a handler.
     policy = ui.policy()
     if not policy.permits(function_name):
+        logs.blocked(f"{function_name} is not in this conversation's tool set "
+                     f"({policy.label or 'default'})")
         return policy.refusal(function_name)
 
     verdict, rule = permissions.decide(function_name, arguments)
     if verdict == "deny":
-        print(f"  {S.ERR}✗ Blocked by permission rule: {rule}{S.R}")
+        logs.blocked(f"{function_name} denied by permission rule: {rule}")
         return (f"[System] '{function_name}' is blocked by your permission rules "
                 f"(rule: {rule}). Do not retry it; tell the user it is blocked.")
 
@@ -954,5 +957,5 @@ def _run_tool(function_name: str, arguments: dict) -> str | None:
     if mcp_client.is_mcp_tool(function_name): return handle_mcp_tool_call(function_name, arguments)
     if discord_tools.is_discord_tool(function_name): return discord_tools.dispatch(function_name, arguments)
 
-    print(f"  {S.WARN}\u26a0 Unknown tool: {function_name}{S.R}")
+    logs.warn(f"unknown tool: {function_name}")
     return None

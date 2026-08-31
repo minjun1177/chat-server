@@ -1,11 +1,9 @@
 import re
-import sys
-import asyncio
-import itertools
 import ollama
 import config
+import logs
 import providers
-from config import S, smrp
+from config import smrp
 
 
 _CHARS_PER_TOKEN = 3.5
@@ -85,36 +83,11 @@ async def _compress_context(messages: list[dict]) -> bool:
 
     summary_msg = [{"role": "user", "content": prompt}]
 
-    async def spinner():
-        frames = [
-            f"{S.PURPLE}    ·  {S.R}",
-            f"{S.PURPLE}   · · {S.R}",
-            f"{S.PURPLE}  · · ·{S.R}",
-            f"{S.PURPLE} · · · {S.R}",
-            f"{S.PURPLE}· · ·  {S.R}",
-            f"{S.PURPLE} · ·   {S.R}",
-        ]
-        cycle = itertools.cycle(frames)
-        try:
-            while True:
-                frame = next(cycle)
-                sys.stdout.write(f'\r  {frame} {S.GRAY}Compressing context…{S.R}  ')
-                sys.stdout.flush()
-                await asyncio.sleep(0.15)
-        except asyncio.CancelledError:
-            sys.stdout.write('\r\033[K')
-            sys.stdout.flush()
-
-    spin_task = asyncio.create_task(spinner())
     try:
         summary = await providers.complete(summary_msg, max_tokens=predict_tokens)
-    except Exception as e:
+    except Exception as error:
+        logs.error(f"the context summary could not be generated: {error}")
         summary = ""
-    finally:
-        if not spin_task.done():
-            spin_task.cancel()
-            try: await spin_task
-            except asyncio.CancelledError: pass
 
     if not summary or summary.startswith("(Summary failed"):
         return False
@@ -159,24 +132,24 @@ async def _manage_context(messages: list[dict]) -> None:
 
     if n_pairs <= 2:
         if _estimate_tokens(messages) > budget:
-            print(f"\n  {S.WARN}⚠ Context limit approaching. Compressing…{S.R}")
+            logs.info("context limit approaching - compressing")
             ok = await _compress_context(messages)
             if ok:
                 latest = pairs[-1] if pairs else []
                 messages[:] = [messages[0]] + latest
-                print(f"  {S.OK}✓ Context compressed.{S.R}\n")
+                logs.info("context compressed")
         return
 
-    print(f"\n  {S.WARN}⚠ Context limit approaching. Compressing…{S.R}")
+    logs.info("context limit approaching - compressing")
     ok = await _compress_context(messages)
     if ok:
         keep = pairs[-2:]
         keep_msgs = [msg for pair in keep for msg in pair]
         messages[:] = [messages[0]] + keep_msgs
-        print(f"  {S.OK}✓ Context compressed ({n_pairs} → {len(keep)} pairs kept).{S.R}\n")
+        logs.info(f"context compressed ({n_pairs} → {len(keep)} pairs kept)")
         return
 
-    print(f"  {S.WARN}⚠ Summary failed. Dropping oldest turns…{S.R}")
+    logs.warn("the context summary failed - dropping the oldest turns")
     while _estimate_tokens(messages) > budget and len(_get_conv_pairs(messages)) > 2:
         cur_pairs = _get_conv_pairs(messages)
         keep_pairs = cur_pairs[1:]
@@ -185,4 +158,4 @@ async def _manage_context(messages: list[dict]) -> None:
 
     dropped = n_pairs - len(_get_conv_pairs(messages))
     if dropped > 0:
-        print(f"  {S.OK}✓ Dropped {dropped} oldest turn(s).{S.R}\n")
+        logs.info(f"dropped {dropped} oldest turn(s)")

@@ -21,7 +21,7 @@ import datetime
 import io
 import os
 import sys
-import traceback
+import time
 
 import discord
 from discord import app_commands
@@ -30,6 +30,7 @@ import agent
 import config
 import discord_tools
 import env
+import logs
 import mcp_client
 import permissions
 import providers
@@ -133,14 +134,14 @@ class HarnessBot(discord.Client):
     async def setup_hook(self) -> None:
         register_commands(self)
         await self.tree.sync()
-        print("[bot] application commands synced")
+        logs.info(f"application commands synced ({len(self.tree.get_commands())})")
 
     async def on_ready(self):
-        print(f"[bot] logged in as {self.user} (id={self.user.id})")
-        print(f"[bot] provider: {providers.status_line()}")
+        logs.info(f"logged in as {self.user} (id={self.user.id})")
+        logs.info(f"provider: {providers.status_line()} · log layer: {logs.level()}")
         if not config.DISCORD_OWNER_IDS:
-            print("[bot] WARNING: DISCORD_OWNER_IDS is empty in .env - every "
-                  "conversation is limited to the safe, read-only tool set.")
+            logs.warn("DISCORD_OWNER_IDS is empty in .env - every conversation is "
+                      "limited to the safe, read-only tool set.")
 
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.author.id == self.user.id:
@@ -164,6 +165,8 @@ class HarnessBot(discord.Client):
 
         level = access_level(message.author.id, message.guild.id if message.guild else None, is_dm)
         if level is NOBODY:
+            logs.blocked(f"{_who(message.author)} is not allowed here "
+                         f"({_where(message.channel, message.guild)})")
             try:
                 await message.add_reaction("🔒")
             except discord.HTTPException:
@@ -178,6 +181,8 @@ class HarnessBot(discord.Client):
         sess = get_session(message.guild.id if message.guild else None,
                            message.channel.id, message.author.id, level)
         prompt = await build_prompt(content, message.attachments, sess, message.author)
+        logs.request(_who(message.author), _where(message.channel, message.guild), content,
+                     f"(+{len(message.attachments)} file)" if message.attachments else "")
         if not prompt:
             await message.channel.send("Ask me something and I'll get to work - a question, or a task to run.")
             return
@@ -201,6 +206,17 @@ class HarnessBot(discord.Client):
 # ---------------------------------------------------------------------------
 # running a turn
 # ---------------------------------------------------------------------------
+
+def _who(user) -> str:
+    name = getattr(user, "display_name", None) or str(user)
+    return f"{name}({user.id})"
+
+
+def _where(channel, guild) -> str:
+    if guild is not None:
+        return f"#{getattr(channel, 'name', channel.id if channel else '?')} in {guild.name}"
+    return "a DM" if channel is not None else "an interaction"
+
 
 def cancel_session(sess: agent.AgentSession) -> int:
     """Stop whatever this conversation is doing. A queued turn counts too."""
@@ -243,18 +259,23 @@ async def launch_turn(client, sess, prompt, sink, channel, guild, author, is_use
             client=client, loop=asyncio.get_running_loop(), channel=channel,
             guild=guild, author=author, workspace=sess.workspace, is_user_app=is_user_app)
         token = discord_tools.set_context(ctx)
+        _, turn_token = logs.begin()
+        started = time.time()
         try:
             await agent.run_turn(sess, prompt, sink, memory_file=memory_file)
+            logs.turn_done(f"{sink.tools_run} tool(s) · {time.time() - started:.1f}s")
         except asyncio.CancelledError:
+            logs.turn_done(f"stopped after {time.time() - started:.1f}s")
             with_suppressed(channel.send("⏹ Stopped."))
             raise
         except Exception as error:                      # noqa: BLE001
-            traceback.print_exc()
+            logs.error(f"turn failed: {type(error).__name__}: {error}", exc=True)
             try:
                 await channel.send(f"⚠ Something went wrong: `{type(error).__name__}: {error}`")
             except discord.HTTPException:
                 pass
         finally:
+            logs.end(turn_token)
             discord_tools.reset_context(token)
 
     task = asyncio.create_task(runner())
@@ -564,7 +585,7 @@ def _archive(sess: agent.AgentSession) -> None:
     try:
         os.replace(current, os.path.join(sess.session_dir, f"{sess.session_id}-{stamp}.json"))
     except OSError as error:
-        print(f"[bot] could not archive the session: {error}")
+        logs.error(f"could not archive the session: {error}")
 
 
 # ---------------------------------------------------------------------------
@@ -577,30 +598,31 @@ def start_mcp() -> None:
     pending = [s for s in mcp_client.load_servers().values() if s.state != "disabled"]
     if not pending:
         return
-    print(f"[bot] connecting {len(pending)} MCP server(s)…")
+    logs.info(f"connecting {len(pending)} MCP server(s)…")
     mcp_client.connect_all()
     for server in pending:
         if server.state == "failed":
-            print(f"[bot] MCP server '{server.name}' failed: {str(server.error)[:200]}")
+            logs.error(f"MCP server '{server.name}' failed: {str(server.error)[:200]}")
 
 
 def main() -> int:
+    logs.setup()
     for problem in env.audit():
-        print(f"[bot] ⚠ {problem}")
+        logs.warn(problem)
 
     token = os.environ.get(config.DISCORD_TOKEN_ENV, "").strip()
     if not token:
         where = ", ".join(env.sources()) or ".env"
-        print(f"No bot token. Put {config.DISCORD_TOKEN_ENV}=… in {where} "
-              f"(start from .env.example) or set it in the environment.")
+        logs.error(f"no bot token. Put {config.DISCORD_TOKEN_ENV}=… in {where} "
+                   f"(start from .env.example) or set it in the environment.")
         return 2
     if env.sources():
-        print(f"[bot] settings from {', '.join(env.sources())}")
+        logs.info(f"settings from {', '.join(env.sources())}")
 
     providers.apply_startup()
     problem = providers.current().ready()
     if problem:
-        print(f"[bot] the model provider is not usable yet: {problem}")
+        logs.error(f"the model provider is not usable yet: {problem}")
         return 2
 
     # Rules from .permissions.discord.json apply on top of the usual ones, so
@@ -614,13 +636,13 @@ def main() -> int:
 
     client = HarnessBot()
     try:
-        client.run(token, log_handler=None)
+        client.run(token, log_handler=None)   # logs.py owns the handlers
     except discord.LoginFailure:
-        print("[bot] Discord rejected the token.")
+        logs.error("Discord rejected the token.")
         return 2
     except discord.PrivilegedIntentsRequired:
-        print("[bot] Enable the MESSAGE CONTENT intent for this app in the Discord "
-              "developer portal (Bot → Privileged Gateway Intents).")
+        logs.error("enable the MESSAGE CONTENT intent for this app in the Discord "
+                   "developer portal (Bot → Privileged Gateway Intents).")
         return 2
     finally:
         mcp_client.shutdown()

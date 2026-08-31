@@ -8,7 +8,7 @@ import re
 import json
 import asyncio
 import config
-from config import S
+import logs
 from tools import dispatch_tool, coerce_arguments
 import providers
 import ui
@@ -365,10 +365,8 @@ def _decode_tool_call(blob: str, quiet: bool, complete: bool = True) -> tuple[st
 
     if cut_block:
         if not quiet:
-            print(f"  {S.ERR}✗ The tool call was cut off before it finished; "
-                  f"nothing was run.{S.R}")
-            print(f"  {S.MUTED}  The reply probably hit num_predict "
-                  f"({config.NUM_PREDICT}). Raise it in config.py.{S.R}")
+            logs.error("a tool call was cut off before it finished; nothing was run "
+                       f"(the reply probably hit num_predict, {config.NUM_PREDICT})")
         return None
 
     try:
@@ -396,17 +394,15 @@ def _decode_tool_call(blob: str, quiet: bool, complete: bool = True) -> tuple[st
     if tool_data is None:
         if not quiet:
             if in_string or not complete:
-                print(f"  {S.ERR}✗ The tool call was cut off before it finished; "
-                      f"nothing was run.{S.R}")
-                print(f"  {S.MUTED}  The reply probably hit num_predict "
-                      f"({config.NUM_PREDICT}). Raise it in config.py.{S.R}")
+                logs.error("a tool call was cut off before it finished; nothing was run "
+                           f"(the reply probably hit num_predict, {config.NUM_PREDICT})")
             else:
-                print(f"  {S.ERR}✗ AI generated invalid JSON for the tool call.{S.R}")
+                logs.error("the model generated invalid JSON for a tool call")
         return None
 
     if not tool_data.get("name"):
         if not quiet:
-            print(f"  {S.ERR}✗ The tool call is missing a tool name.{S.R}")
+            logs.error("a tool call is missing its tool name")
         return None
 
     arguments = _normalise_arguments(tool_data)
@@ -415,7 +411,7 @@ def _decode_tool_call(blob: str, quiet: bool, complete: bool = True) -> tuple[st
         note = (note + "; " if note else "") + "the parameters were not nested under 'arguments'"
     arguments.update(raw_blocks)          # a raw block always wins over the JSON
     if note and not quiet:
-        print(f"  {S.WARN}⚠ Malformed tool call: {note}. Repaired and continuing.{S.R}")
+        logs.warn(f"malformed tool call: {note}. Repaired and continuing.")
     return tool_data["name"], arguments
 
 

@@ -32,6 +32,7 @@ one does.
 - **Agent Skills**: Folder-based instruction packs (`skills/<name>/SKILL.md`) that the model loads on demand. Only each skill's name and description sit in the system prompt, so a large library stays cheap until a skill is actually needed.
 - **Tool Permissions**: Rules in `.permissions.json` decide what runs without asking and what never runs at all, filling the gap between prompting for everything and `/automode` allowing everything. Answering `a` at any approval prompt saves a rule.
 - **Reasoning Model Support**: A model's `<think>` blocks (and Ollama's separate `thinking` field) are kept out of the answer, off the screen by default, and out of the conversation history - so scratch work never eats the context budget.
+- **Layered Logs**: `error`, `tool` and `request`, each including the one above it, tied together by a per-exchange id. The tool layer doubles as an audit trail of who ran what and which approvals were granted.
 - **Nothing Personal in the Repository**: keys, tokens and the account ids allowed to use the bot live in a git-ignored `.env`; `config.py` holds only publishable defaults, and startup warns if a `.env` is ever staged for commit.
 - **Discord Bot**: `python bot.py` puts the same harness in Discord - mention it, reply to it, or `/call` it from anywhere as a user-installed app. Tool calls show up as live embeds, approvals become buttons, and a tool policy keeps everything that writes to the machine in the owner's hands.
 - **MCP Servers**: Any Model Context Protocol server declared in `.mcp.json` is started with the app, and its tools join the built-in ones as `mcp__<server>__<tool>`. Local subprocesses (stdio) and remote endpoints (streamable HTTP, legacy SSE) are all supported, with the same approval prompt guarding every call.
@@ -530,7 +531,49 @@ takes effect as soon as it returns.
 
 ---
 
-## 10. Running Commands
+## 10. Logs
+
+Three layers, each one including the layer above it:
+
+| `LOG_LEVEL` | What it adds |
+| :--- | :--- |
+| `error` | something failed, or was refused |
+| `tool` | **(default)** every tool call - who asked, what it did, how it ended - and every approval decision |
+| `request` | every message and command that reached the bot |
+| `debug` | the harness talking to itself, and discord.py's own logs |
+
+The layers nest on screen as well as in verbosity. Everything one exchange does
+carries the same four-character turn id, and its tool lines are indented under
+the request that caused them, so a busy channel still reads as separate
+conversations instead of one interleaved stream:
+
+```
+14:22:01 REQ  a3f2  » alice(77) in #general in srv · "이 서버 정보 알려줘"
+14:22:01 TOOL a3f2    ▸ discord_server_info for alice(77)
+14:22:02 TOOL a3f2    ✓ discord_server_info · 812 chars · 0.21s
+14:22:07 REQ  a3f2  « done · 1 tool(s) · 6.1s
+14:23:40 WARN ----    ⛔ stranger(999) is not allowed here (#general in srv)
+```
+
+The `tool` layer is the **audit trail**, which is why it sits below errors
+rather than beside debug output: a bot that can run shell commands should leave
+a record of who asked it to, and of every approval granted, refused or timed
+out. Blocked calls - a tool outside someone's policy, or a `deny` rule - are
+logged as warnings, so a default install still records them.
+
+```bash
+LOG_LEVEL=tool
+LOG_FILE=logs/bot.log     # also write there, rotating at 2MB, keeping 3
+LOG_PREVIEW=120           # characters of a message to log; 0 logs only its length
+```
+
+`LOG_PREVIEW=0` is the privacy setting: requests are still counted and timed,
+but no message text is ever written down. Colour is used only when the output
+is a terminal, so a log file or `journalctl` stays clean.
+
+---
+
+## 11. Running Commands
 
 `run_cmd` captures the command's output, which means the command can never show
 anything to the user while it runs - including a prompt. So it is given no
@@ -592,7 +635,7 @@ prints and for what `send_input` sends back to it.
 
 ---
 
-## 11. Tool Permissions
+## 12. Tool Permissions
 
 Until now the only gate was the approval prompt, and `/automode on` turned it
 off for everything at once - including `run_cmd` and `delete_file`. Rules give
@@ -631,7 +674,7 @@ by hand, and `/perms reload` re-reads the files.
 
 ---
 
-## 12. Reasoning Models
+## 13. Reasoning Models
 
 Reasoning models (qwen3, deepseek-r1, gpt-oss) emit their scratch work before
 the answer - either wrapped in `<think>` tags in the content stream, or in
@@ -650,7 +693,7 @@ itself and *then* calls a tool shows only the explanation.
 
 ---
 
-## 13. Architecture
+## 14. Architecture
 
 The codebase is organized cleanly around the following components:
 
@@ -659,6 +702,7 @@ The codebase is organized cleanly around the following components:
 - **`discord_ui.py`**: `DiscordSink` - streamed message edits, tool embeds, approval / question / plan buttons, and the thread-to-loop bridge.
 - **`discord_tools.py`**: The Discord-only tools and the prompt section they are advertised in.
 - **`agent.py`**: `AgentSession` - one conversation per place the bot is talking, with its own history, memory namespace, lock and persistence.
+- **`logs.py`**: The three log layers, the per-turn id that ties them together, and the rotating file handler.
 - **`env.py`**: Reads `.env` into the environment - the one place deployment settings and secrets come from, with no dependency.
 - **`config.py`**: Settings. The three that describe a *conversation* rather than the program - loaded skills, session title, token history - are scoped to the running task, so concurrent channels cannot overwrite each other's.
 - **`llm_client.py`**: The conversation loop - streaming a reply, parsing the tool calls out of it, running them. Knows nothing about which provider answered, nor about where the answer is being shown.
@@ -681,3 +725,12 @@ The codebase is organized cleanly around the following components:
 - **`memory/discord-<user id>.json`**: One memory store per Discord user.
 - **`.mcp.json`**: Project-level MCP server declarations (see `.mcp.json.example`). Personal ones live in `~/.localchat/mcp.json`.
 - **`sessions/discord/`**: JSON transcripts, one per conversation, reloaded when the bot restarts.
+
+---
+
+## 15. License
+
+[Nihagosepeungeodachuehasem License](https://github.com/200mill/nihagosepeungeodachuehasem-license)
+v1.1 - see [`LICENSE`](LICENSE), or [`LICENSE.ko`](LICENSE.ko) for the Korean
+original. In short: do whatever you want with it, and nobody is liable for
+anything.

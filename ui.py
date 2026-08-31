@@ -13,7 +13,7 @@ one and a silent "yes" is the wrong default for a tool that can delete files.
 from contextvars import ContextVar
 
 import config
-from config import S
+import logs
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +68,7 @@ class Sink:
     tool_policy: ToolPolicy = ALLOW_ALL
     show_thinking = None            # None = follow config.SHOW_THINKING
     aborted = False                 # the user stopped this turn
+    tools_run = 0                   # how many tools this exchange has called
 
     # -- streaming ---------------------------------------------------------
     async def turn_start(self) -> None: ...
@@ -114,7 +115,7 @@ class Sink:
 # ---------------------------------------------------------------------------
 
 class ConsoleSink(Sink):
-    """Log to the bot's stdout; refuse anything that needs a person.
+    """Log the turn; refuse anything that needs a person.
 
     Nothing should normally run under this - every turn binds a `DiscordSink` -
     but a tool reached with no sink bound must still behave, and behaving means
@@ -131,39 +132,38 @@ class ConsoleSink(Sink):
         self._line += delta
         while "\n" in self._line:
             line, self._line = self._line.split("\n", 1)
-            print(f"  {S.GRAY}{line}{S.R}")
+            if line.strip():
+                logs.debug(f"  {line}")
 
     async def turn_end(self, prompt_tokens: int, completion_tokens: int,
                        total_seconds: float, eval_seconds: float) -> None:
         if self._line.strip():
-            print(f"  {S.GRAY}{self._line}{S.R}")
+            logs.debug(f"  {self._line}")
         self._line = ""
-        print(f"  {S.MUTED}─ tokens: {prompt_tokens} in · {completion_tokens} out · "
-              f"{total_seconds:.1f}s{S.R}")
+        logs.debug(f"  tokens: {prompt_tokens} in · {completion_tokens} out · "
+                   f"{total_seconds:.1f}s")
 
     # -- tools -------------------------------------------------------------
 
     async def tool_call(self, name: str, arguments: dict):
-        print(f"  {S.INFO}▸{S.R} {name} {S.MUTED}{_preview(arguments)}{S.R}")
+        logs.tool_call(name, arguments)
         return None
 
     async def tool_result(self, handle, name: str, result: str) -> None:
         failed = (result or "").lstrip().startswith("[Error]")
-        mark = f"{S.ERR}✗{S.R}" if failed else f"{S.OK}✓{S.R}"
-        print(f"  {mark} {name} {S.MUTED}({len(result or '')} chars){S.R}")
+        logs.tool_result(name, not failed, len(result or ""), 0.0)
 
     async def notice(self, text: str, level: str = "info") -> None:
-        color = {"warn": S.WARN, "error": S.ERR, "ok": S.OK}.get(level, S.MUTED)
-        print(f"  {color}{text}{S.R}")
+        (logs.warn if level in ("warn", "error") else logs.info)(text)
 
     # -- asking: there is nobody to ask ------------------------------------
 
     def ask_approval(self, label: str, details: list[tuple[str, str]], rule: str = "") -> bool:
-        print(f"  {S.WARN}⚠ '{label}' needed approval with no one to ask - refused.{S.R}")
+        logs.approval(label, "nobody (unattended)", False, rule)
         return False
 
     def ask_choice(self, question: str, options: list[str], index: int, total: int) -> str | None:
-        print(f"  {S.WARN}⚠ A question had no one to answer it: {question}{S.R}")
+        logs.warn(f"a question had no one to answer it: {question}")
         return None
 
     def ask_plan(self, context_discovered: str, diff_blueprint: str,
