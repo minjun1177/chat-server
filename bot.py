@@ -28,6 +28,7 @@ from discord import app_commands
 
 import agent
 import config
+import context
 import discord_tools
 import env
 import logs
@@ -383,6 +384,32 @@ def register_commands(client: HarnessBot) -> None:
         embed.set_footer(text=f"your memories: {memory_file_for(interaction.user.id)}")
         await interaction.response.send_message(embed=embed)
 
+    @tree.command(name="usage", description="Show this conversation's token usage")
+    @anywhere
+    async def usage(interaction: discord.Interaction):
+        level, sess, _ = await resolve(interaction)
+        if sess is None:
+            return
+        requests = len(sess.token_history)
+        prompt_tokens = sum(t.get("prompt", 0) for t in sess.token_history)
+        completion_tokens = sum(t.get("completion", 0) for t in sess.token_history)
+        total = prompt_tokens + completion_tokens
+        avg = total // requests if requests else 0
+
+        budget = context.ctx_budget()
+        estimated = context.estimate_tokens(sess.messages)
+        pct = min(100, round(100 * estimated / budget)) if budget > 0 else 0
+
+        embed = discord.Embed(title="Token usage", color=discord.Color.blurple())
+        embed.add_field(name="Requests", value=f"{requests}")
+        embed.add_field(name="Prompt", value=f"{prompt_tokens}")
+        embed.add_field(name="Completion", value=f"{completion_tokens}")
+        embed.add_field(name="Total", value=f"{total}")
+        embed.add_field(name="Avg / request", value=f"{avg}")
+        embed.add_field(name="Context window", value=f"~{estimated} / {budget} ({pct}%)")
+        embed.set_footer(text=providers.status_line())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @tree.command(name="export", description="Download this conversation as Markdown")
     @anywhere
     async def export(interaction: discord.Interaction):
@@ -430,10 +457,10 @@ def register_commands(client: HarnessBot) -> None:
             color=discord.Color.blurple())
         embed.add_field(
             name="Commands",
-            value=("`/call` ask · `/new` reset · `/session` state · `/export` download\n"
-                   "`/stop` cancel · `/tools` what I can use · `/memory` your notes\n"
-                   "`/mcp` servers · `/think` show reasoning · `/model` provider (owner)\n"
-                   "`/perms` permission rules (owner)"),
+            value=("`/call` ask · `/new` reset · `/session` state · `/usage` tokens\n"
+                   "`/export` download · `/stop` cancel · `/tools` what I can use\n"
+                   "`/memory` your notes · `/mcp` servers · `/think` show reasoning\n"
+                   "`/model` provider (owner) · `/perms` permission rules (owner)"),
             inline=False)
         embed.add_field(name="Your access",
                         value={OWNER: "owner - every tool, each behind an approval button",

@@ -17,6 +17,16 @@ def _get_ctx_budget() -> int:
     return int(config.NUM_CTX * 0.85) - config.NUM_PREDICT
 
 
+def estimate_tokens(messages: list[dict]) -> int:
+    """Public wrapper on the same estimate the compressor budgets against, for /usage."""
+    return _estimate_tokens(messages)
+
+
+def ctx_budget() -> int:
+    """Public wrapper on the compression budget, for /usage."""
+    return _get_ctx_budget()
+
+
 def _get_summary_predict_tokens() -> int:
     # Sized off the local model's weights, which only Ollama reports; a hosted
     # model gets the middle setting.
