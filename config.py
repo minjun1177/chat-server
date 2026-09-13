@@ -222,6 +222,7 @@ DISCORD_SAFE_TOOLS = {
     "write_memory", "read_memory", "get_memory_list", "edit_memory", "delete_memory",
     "get_user_input", "use_skill", "skill",
     "discord_read_messages", "discord_server_info", "discord_user_info",
+    "discord_list_events",
     "list_mcp_resources", "read_mcp_resource",
 }
 
@@ -231,6 +232,18 @@ DISCORD_OWNER_TOOLS = {
     "write_file", "edit_file", "delete_file", "copy_file", "create_dir",
     "call_api", "get_system_info", "submit_plan_for_approval",
     "discord_send_file", "mcp__*",
+    # Server-admin actions - the bot account must also hold the matching
+    # Discord permission (Manage Events / Roles / Channels) for these to work.
+    "discord_create_event", "discord_cancel_event", "discord_edit_event",
+    "discord_manage_role", "discord_create_channel",
+    "discord_kick_member", "discord_ban_member", "discord_unban_member",
+    "discord_list_bans", "discord_timeout_member", "discord_set_nickname",
+    "discord_move_member",
+    "discord_purge_messages", "discord_delete_message", "discord_pin_message",
+    "discord_edit_channel", "discord_delete_channel", "discord_lock_channel",
+    "discord_create_invite",
+    "discord_create_role", "discord_edit_role", "discord_delete_role",
+    "discord_audit_log",
 }
 
 DISCORD_MCP_FOR_EVERYONE = env.flag("DISCORD_MCP_FOR_EVERYONE", False)  # true moves mcp__* into the safe set
