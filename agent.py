@@ -17,6 +17,8 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import config
 import session as session_store
@@ -31,11 +33,41 @@ from systemprompt import systemprompt as build_system_prompt
 _SUMMARY = re.compile(r'\n\n<SUMMARY>(.*?)</SUMMARY>', re.DOTALL)
 
 
+def _now() -> datetime:
+    if config.TIMEZONE:
+        try:
+            return datetime.now(ZoneInfo(config.TIMEZONE))
+        except (ZoneInfoNotFoundError, ValueError):
+            pass                                # a typo in .env falls back to the machine's zone
+    return datetime.now().astimezone()
+
+
+def current_time_block() -> str:
+    """The clock, so the model never has to guess today from its training data.
+
+    It sits after the tool list and before any summary: everything above it
+    stays byte-identical between turns, which is the part a provider's prompt
+    cache can reuse.
+    """
+    local = _now()
+    utc = local.astimezone(timezone.utc)
+    offset = local.strftime("%z")
+    offset = f"UTC{offset[:3]}:{offset[3:]}" if offset else "UTC"
+    return "\n".join([
+        "\n\n### CURRENT DATE AND TIME:",
+        f"{local:%Y-%m-%d (%A) %H:%M} {local.tzname() or ''} ({offset}) - "
+        f"{utc:%Y-%m-%d %H:%M} UTC.",
+        "This is when the current message arrived. Use it for anything relative "
+        "(\"today\", \"tomorrow 8pm\", \"in two hours\", how long ago something happened) "
+        "and prefer it over any date you remember from training.",
+    ])
+
+
 def compose_system_prompt(tool_filter=None, discord: bool = False, summary: str = "") -> str:
     base = build_system_prompt(tool_filter=tool_filter, discord=discord)
     if config.CUSTOM_PERSONA:
         base = config.CUSTOM_PERSONA + "\n\n" + base
-    return base + summary
+    return base + current_time_block() + summary
 
 
 def extract_summary(system_content: str) -> str:
@@ -252,6 +284,9 @@ async def run_turn(sess: AgentSession, user_text: str, sink: ui.Sink,
                 sess.last_used = time.time()
                 with bound(sess, memory_file):
                     try:
+                        # A session can live for hours, so the clock in its
+                        # system prompt is re-stamped at the start of every turn.
+                        sess.refresh_system_prompt()
                         sess.messages.append({"role": "user",
                                               "content": config.safe_text(user_text)})
                         config.repair_messages(sess.messages)

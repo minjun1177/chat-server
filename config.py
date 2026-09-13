@@ -118,6 +118,7 @@ AUTO_ALLOW = False
 RETURN_ALL_FILE_CONTENT = True
 SAVE_CHAT_HISTORY = True
 CUSTOM_PERSONA = ""
+TIMEZONE = env.text("LOCALCHAT_TIMEZONE", "")  # IANA name for the clock in the system prompt; empty = the machine's zone
 
 # run_cmd stays connected to the command instead of waiting for it to finish.
 # When the output goes quiet for CMD_IDLE_TIMEOUT the process is most likely
