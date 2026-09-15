@@ -158,7 +158,9 @@ class Provider:
         """[{"name": ..., "detail": ...}], newest/most useful first."""
         raise NotImplementedError
 
-    def stream(self, messages: list, max_tokens: int | None = None):
+    def stream(self, messages: list, max_tokens: int | None = None, think: bool | None = None):
+        """`think=False` asks a reasoning model to answer directly; providers
+        without such a switch ignore it."""
         raise NotImplementedError
 
     # -- shared helpers ----------------------------------------------------
@@ -215,12 +217,15 @@ class OllamaProvider(Provider):
             models.append({"name": name, "detail": detail})
         return models
 
-    async def stream(self, messages: list, max_tokens: int | None = None):
+    async def stream(self, messages: list, max_tokens: int | None = None, think: bool | None = None):
         import config
         options = {"num_ctx": config.NUM_CTX,
                    "num_predict": max_tokens or config.NUM_PREDICT}
+        # Only an explicit False is sent: Ollama accepts think=False from every
+        # model, but think=True is a 400 on models without reasoning.
+        extra = {"think": False} if think is False else {}
         response = await self._client().chat(model=self.model, messages=messages,
-                                             stream=True, options=options)
+                                             stream=True, options=options, **extra)
         async for chunk in response:
             message = chunk.get("message") or {}
             text = message.get("content", "") or ""
@@ -255,7 +260,7 @@ class AnthropicProvider(Provider):
         return [{"name": item["id"], "detail": item.get("display_name", "")}
                 for item in data.get("data", []) if item.get("id")]
 
-    def stream(self, messages: list, max_tokens: int | None = None):
+    def stream(self, messages: list, max_tokens: int | None = None, think: bool | None = None):
         import config
         system, conversation = split_system(messages)
         payload = {
@@ -322,7 +327,7 @@ class OpenAIProvider(Provider):
         names = sorted(item["id"] for item in data.get("data", []) if item.get("id"))
         return [{"name": name, "detail": ""} for name in names]
 
-    def stream(self, messages: list, max_tokens: int | None = None):
+    def stream(self, messages: list, max_tokens: int | None = None, think: bool | None = None):
         import config
         payload = {
             "model": self.model,
@@ -400,7 +405,7 @@ class GeminiProvider(Provider):
                 models.append({"name": name, "detail": item.get("displayName", "")})
         return models
 
-    def stream(self, messages: list, max_tokens: int | None = None):
+    def stream(self, messages: list, max_tokens: int | None = None, think: bool | None = None):
         import config
         system, conversation = split_system(messages)
         contents = [{"role": "model" if m["role"] == "assistant" else "user",

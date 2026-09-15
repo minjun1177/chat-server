@@ -105,7 +105,7 @@ def strip_thinking(text: str) -> str:
     return cleaned.strip()
 
 
-async def stream_reply(messages: list[dict]) -> str:
+async def stream_reply(messages: list[dict], think: bool | None = None) -> str:
     """Stream one reply, handing every piece of it to the active sink.
 
     What the pieces look like on screen is the sink's business - a terminal
@@ -126,7 +126,7 @@ async def stream_reply(messages: list[dict]) -> str:
     eval_duration = 0.0
 
     try:
-        reply = providers.current().stream(messages)
+        reply = providers.current().stream(messages, think=think)
 
         async for chunk in reply:
             content = chunk.get('text', '') or ''
@@ -445,11 +445,20 @@ def parse_tool_calls(response_text: str, quiet: bool = False) -> list[tuple[str,
 
 
 MAX_PARSE_RETRIES = 2
+MAX_EMPTY_RETRIES = 3
+
+# Small local models (gemma4:e4b measured at ~80% of first replies) often
+# reason "I should use search_web" and then stop without writing anything. A
+# plain resample recovered 5 of 12 such turns in three tries; this nudge
+# recovered 9 of 12.
+EMPTY_REPLY_NUDGE = ("[System] Your last reply was empty - you decided what to do but wrote "
+                     "nothing. Do it now: write the <tool_call> block, or write the answer.")
 
 
 async def chat_turn(messages: list[dict]) -> str:
     call_count = 0
     parse_failures = 0
+    empty_replies = 0
     while True:
         # Text a console mangled cannot be encoded, so one bad character would
         # fail this request and every later one. Repair it before it is sent.
@@ -462,8 +471,29 @@ async def chat_turn(messages: list[dict]) -> str:
             if not keep_going:
                 return messages[-2]["content"] if len(messages) >= 2 else "Tool usage stopped."
                 
-        response_text = await stream_reply(messages)
+        # A retry after an empty reply skips the reasoning pass, which is where
+        # the model talks itself into stopping. Measured on 10 turns that went
+        # empty: with reasoning off all 10 answered on the first retry; with the
+        # nudge alone one of them needed a second.
+        response_text = await stream_reply(messages, think=False if empty_replies else None)
         stored = response_text if config.STORE_THINKING else strip_thinking(response_text)
+
+        if not strip_thinking(response_text).strip():
+            # Nothing but (possibly) reasoning. Ending here used to finish the
+            # turn in silence, which on Discord looks like the bot ignoring you.
+            if empty_replies < MAX_EMPTY_RETRIES:
+                empty_replies += 1
+                messages.append({"role": "assistant", "content": stored})
+                messages.append({"role": "user", "content": EMPTY_REPLY_NUDGE})
+                continue
+            await ui.current().notice(
+                f"⚠  The model returned an empty reply {MAX_EMPTY_RETRIES + 1} times in a row.", "warn")
+        elif empty_replies:
+            # Recovered: the empty replies and the nudges were scaffolding, not
+            # conversation, and would only teach the model the pattern.
+            del messages[-2 * empty_replies:]
+            empty_replies = 0
+
         messages.append({"role": "assistant", "content": stored})
 
         parsed = parse_tool_calls(response_text)
