@@ -13,7 +13,6 @@ import datetime
 import shutil
 import unicodedata
 import time
-from duckduckgo_search import DDGS
 import requests
 from bs4 import BeautifulSoup
 import random
