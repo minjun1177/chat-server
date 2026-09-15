@@ -17,7 +17,7 @@ import ui
 from ui import approval_prompt as _approval_prompt
 import permissions
 import shell_session
-from websearch import search_web as search_pipeline, strip_html
+from websearch import search_web as search_pipeline, strip_html, read_page
 
 if TREE_SITTER_AVAILABLE:
     from config import Parser, Query, QueryCursor
@@ -288,13 +288,7 @@ def handle_create_dir(dirpath: str) -> str:
 
 def handle_get_url(url: str) -> str:
     try:
-        response = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-        response.raise_for_status()
-        content_type = response.headers.get("Content-Type", "")
-        if "text/html" in content_type:
-            content = strip_html(response.text)
-        else:
-            content = response.text
+        content = read_page(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         if not config.RETURN_ALL_FILE_CONTENT and len(content) > config.FILE_MAX_DISPLAY_LENGTH:
             content = content[:config.FILE_MAX_DISPLAY_LENGTH] + "\n...[Too long]..."
         return content

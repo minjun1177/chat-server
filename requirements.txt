@@ -1,7 +1,8 @@
 ollama
-duckduckgo_search
+ddgs
 requests
 beautifulsoup4
+lxml
 psutil
 tree-sitter
 tree-sitter-python

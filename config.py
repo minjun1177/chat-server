@@ -101,9 +101,10 @@ SEARCH_MAX_RESULTS = 5
 # Point this at a self-hosted SearXNG (e.g. "http://localhost:8080") to make
 # candidate generation fully local. Empty = use the keyless public sources only.
 SEARXNG_URL = env.text("SEARXNG_URL", "")
+SEARCH_CACHE_TTL = env.integer("SEARCH_CACHE_TTL", 600)  # seconds a query's candidates and fetched pages are reused
 
 SEARCH_CANDIDATES = 10          # results requested per source
-SEARCH_FETCH_PAGES = 8          # pages actually downloaded and read
+SEARCH_FETCH_PAGES = 10         # pages actually downloaded and read
 SEARCH_PAGE_CHARS = 60000       # per-page text kept for ranking
 SEARCH_PASSAGE_CHARS = 900      # passage size, and the snippet size returned
 SEARCH_RESULT_CHARS = 6000      # ceiling on the whole tool result
